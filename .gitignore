@@ -74,6 +74,7 @@ cover/
 # Logs
 *.log
 logs/
+docs/
 
 # Node / Frontend (if added)
 node_modules/

@@ -1,0 +1,48 @@
+services:
+  postgres:
+    image: pgvector/pgvector:pg16
+    container_name: aistore-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgrespassword
+      POSTGRES_DB: aistore_db
+    ports:
+      - "5433:5432"
+    volumes:
+      - aistore_pgdata:/var/lib/postgresql/data
+    networks:
+      - aistore-network
+      - erp-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d aistore_db"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    container_name: aistore-redis
+    restart: unless-stopped
+    ports:
+      - "6380:6379"
+    volumes:
+      - aistore_redisdata:/data
+    networks:
+      - aistore-network
+      - erp-network
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  aistore_pgdata:
+  aistore_redisdata:
+
+networks:
+  aistore-network:
+    driver: bridge
+  erp-network:
+    external: true
