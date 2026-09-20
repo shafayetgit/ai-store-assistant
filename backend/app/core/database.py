@@ -1,3 +1,7 @@
+from datetime import datetime
+from sqlalchemy import DateTime, func
+from sqlalchemy.orm import Mapped, mapped_column
+
 from collections.abc import AsyncGenerator
 from sqlalchemy.ext.asyncio import (
     AsyncEngine,
@@ -30,7 +34,17 @@ AsyncSessionLocal = async_sessionmaker(
 
 # ━━ Declarative Base for all ORM Models ━━
 class Base(DeclarativeBase):
-    pass
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        nullable=False,
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        onupdate=func.now(),
+        nullable=False,
+    )
 
 
 # ━━ FastAPI Dependency Injection ━━
