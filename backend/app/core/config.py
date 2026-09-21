@@ -1,5 +1,6 @@
 from functools import lru_cache
 from typing import Literal
+from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -15,6 +16,16 @@ class Settings(BaseSettings):
     PROJECT_NAME: str = "AIStoreAssistant"
     ENVIRONMENT: Literal["development", "staging", "production"] = "development"
     DEBUG: bool = True
+    
+    @field_validator("DEBUG", mode="before")
+    @classmethod
+    def parse_debug(cls, v: Any) -> bool:
+        if isinstance(v, bool):
+            return v
+        if isinstance(v, str):
+            return v.lower() in ("true", "1", "yes", "on", "dev", "development")
+        return bool(v)
+    
     API_V1_STR: str = "/api/v1"
     SECRET_KEY: str = "insecure-dev-secret-key-change-in-production"
 
@@ -35,6 +46,7 @@ class Settings(BaseSettings):
     LLM_GATEWAY_BASE_URL: str = "http://localhost:8002/api/v1"
     LLM_GATEWAY_API_KEY: str = "gw_live_dev"
     PRIMARY_LLM_MODEL: str = "llama3.1:8b"
+    LLM_MAX_TOOL_TURNS: int = 5
     PRIMARY_EMBEDDING_MODEL: str = "nomic-embed-text"
 
     # Direct Cloud Fallback
@@ -46,7 +58,7 @@ class Settings(BaseSettings):
     LLM_MAX_TOOL_TURNS: int = 3
 
     # Vector Store & RAG
-    EMBEDDING_DIMENSION: int = 768
+    EMBEDDING_DIMENSION: int = 1024
     RAG_SIMILARITY_THRESHOLD: float = 0.70
     RAG_TOP_K: int = 4
 

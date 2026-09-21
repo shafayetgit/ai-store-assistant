@@ -1,4 +1,7 @@
+import os
 from fastapi import FastAPI
+from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
 
 from app.api.v1.router import api_v1_router
 from app.core.config import settings
@@ -18,9 +21,16 @@ def create_application() -> FastAPI:
         lifespan=lifespan,
     )
 
-
     setup_middleware(app)
     app.include_router(api_v1_router, prefix=settings.API_V1_STR)
+
+    # Ensure static directory exists & mount static assets
+    os.makedirs("static/widget", exist_ok=True)
+    app.mount("/static", StaticFiles(directory="static"), name="static")
+
+    @app.get("/demo", include_in_schema=False)
+    async def demo_page():
+        return FileResponse("static/index.html")
 
     return app
 
