@@ -56,3 +56,38 @@ async def test_request_human_handoff(db_session: AsyncSession):
     )
     assert res["success"] is True
     assert res["status"] == "handed_off"
+
+
+async def test_store_tools_edge_case_inputs(db_session: AsyncSession):
+    """Tests tool handlers against None inputs, empty strings, and string max_price."""
+    # 1. Search products with None query and string max_price
+    p_res = await execute_tool(
+        tool_name="search_products",
+        arguments={"query": None, "max_price": "2500"},
+        db=db_session,
+    )
+    assert "products" in p_res
+
+    # 2. Get product details with None sku
+    d_res = await execute_tool(
+        tool_name="get_product_details",
+        arguments={"sku": None},
+        db=db_session,
+    )
+    assert d_res["found"] is False
+
+    # 3. Track order with None order_number
+    t_res = await execute_tool(
+        tool_name="track_order",
+        arguments={"order_number": None},
+        db=db_session,
+    )
+    assert t_res["found"] is False
+
+    # 4. Search policies with None query
+    pol_res = await execute_tool(
+        tool_name="search_store_policies",
+        arguments={"query": None},
+        db=db_session,
+    )
+    assert pol_res["matches_found"] == 0

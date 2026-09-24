@@ -74,6 +74,10 @@ class AgentService:
                     "content": m.content or "",
                 })
 
+        # Ensure first non-system message is not an orphaned tool call
+        while len(messages) > 1 and messages[1].get("role") == "tool":
+            messages.pop(1)
+
         return messages
 
     async def process_message(
@@ -138,7 +142,15 @@ class AgentService:
                 # Execute each tool
                 for tc in tool_calls:
                     fn_name = tc["function"]["name"]
-                    fn_args = json.loads(tc["function"]["arguments"]) if isinstance(tc["function"]["arguments"], str) else tc["function"]["arguments"]
+                    raw_args = tc["function"].get("arguments", {})
+                    if isinstance(raw_args, str):
+                        try:
+                            fn_args = json.loads(raw_args) if raw_args.strip() else {}
+                        except (json.JSONDecodeError, TypeError) as parse_err:
+                            logger.warning(f"Malformed tool call JSON arguments for {fn_name}: {parse_err}. Defaulting to empty dict.")
+                            fn_args = {}
+                    else:
+                        fn_args = raw_args or {}
 
                     result = await execute_tool(
                         tool_name=fn_name,
@@ -247,7 +259,16 @@ class AgentService:
 
                 for tc in tool_calls:
                     fn_name = tc["function"]["name"]
-                    fn_args = json.loads(tc["function"]["arguments"]) if isinstance(tc["function"]["arguments"], str) else tc["function"]["arguments"]
+                    raw_args = tc["function"].get("arguments", {})
+                    if isinstance(raw_args, str):
+                        try:
+                            fn_args = json.loads(raw_args) if raw_args.strip() else {}
+                        except (json.JSONDecodeError, TypeError) as parse_err:
+                            logger.warning(f"Malformed tool call JSON arguments for {fn_name}: {parse_err}. Defaulting to empty dict.")
+                            fn_args = {}
+                    else:
+                        fn_args = raw_args or {}
+
                     result = await execute_tool(
                         tool_name=fn_name,
                         arguments=fn_args,
@@ -272,18 +293,20 @@ class AgentService:
 
         # Stream the final answer tokens
         accumulated_reply: list[str] = []
-        async for token in llm_client.stream_chat_completion(messages=messages):
-            accumulated_reply.append(token)
-            yield token
-
-        final_text = "".join(accumulated_reply)
-        db.add(Message(
-            conversation_id=conversation.id,
-            sender_type=SenderType.ASSISTANT.value,
-            content=final_text,
-        ))
-        conversation.last_active_at = datetime.now(timezone.utc)
-        await db.commit()
+        try:
+            async for token in llm_client.stream_chat_completion(messages=messages):
+                accumulated_reply.append(token)
+                yield token
+        finally:
+            final_text = "".join(accumulated_reply).strip()
+            if final_text:
+                db.add(Message(
+                    conversation_id=conversation.id,
+                    sender_type=SenderType.ASSISTANT.value,
+                    content=final_text,
+                ))
+                conversation.last_active_at = datetime.now(timezone.utc)
+                await db.commit()
 
 
 agent_service = AgentService()

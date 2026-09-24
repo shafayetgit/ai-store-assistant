@@ -7,6 +7,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -57,6 +58,7 @@ async def init_or_resume_session(
 ) -> SessionResponse:
     """
     Initializes a new web chat session or resumes an existing active session.
+    Guarantees concurrency safety against race conditions.
     """
     session_id = payload.session_id or f"web_{uuid.uuid4().hex[:16]}"
 
@@ -80,22 +82,32 @@ async def init_or_resume_session(
             customer.email = payload.visitor_email
         await db.commit()
     else:
-        customer = Customer(
-            full_name=payload.visitor_name or "Website Visitor",
-            email=payload.visitor_email,
-            metadata_info={"source": "web_chat", "initial_url": payload.current_url},
-        )
-        db.add(customer)
-        await db.flush()
+        try:
+            customer = Customer(
+                full_name=payload.visitor_name or "Website Visitor",
+                email=payload.visitor_email,
+                metadata_info={"source": "web_chat", "initial_url": payload.current_url},
+            )
+            db.add(customer)
+            await db.flush()
 
-        identity = ChannelIdentity(
-            customer_id=customer.id,
-            channel_type="web",
-            channel_user_id=session_id,
-            profile_data={"session_id": session_id, "current_url": payload.current_url},
-        )
-        db.add(identity)
-        await db.flush()
+            identity = ChannelIdentity(
+                customer_id=customer.id,
+                channel_type="web",
+                channel_user_id=session_id,
+                profile_data={"session_id": session_id, "current_url": payload.current_url},
+            )
+            db.add(identity)
+            await db.flush()
+        except IntegrityError:
+            await db.rollback()
+            # Race condition: another concurrent request created the identity in the meantime
+            res = await db.execute(stmt)
+            identity = res.scalar_one_or_none()
+            if identity and identity.customer:
+                customer = identity.customer
+            else:
+                raise
 
     # 2. Resolve or create active Conversation
     conv_stmt = (
@@ -111,15 +123,20 @@ async def init_or_resume_session(
     conversation = conv_res.scalars().first()
 
     if not conversation:
-        conversation = Conversation(
-            customer_id=customer.id,
-            channel_type="webchat",
-            session_state=ConversationState.AI_ACTIVE.value,
-            metadata_info={"current_url": payload.current_url},
-        )
-        db.add(conversation)
-        await db.commit()
-        await db.refresh(conversation)
+        try:
+            conversation = Conversation(
+                customer_id=customer.id,
+                channel_type="webchat",
+                session_state=ConversationState.AI_ACTIVE.value,
+                metadata_info={"current_url": payload.current_url},
+            )
+            db.add(conversation)
+            await db.commit()
+            await db.refresh(conversation)
+        except IntegrityError:
+            await db.rollback()
+            conv_res = await db.execute(conv_stmt)
+            conversation = conv_res.scalars().first()
 
     return SessionResponse(
         session_id=session_id,
@@ -186,7 +203,7 @@ async def get_session_history(
                 "created_at": m.created_at.isoformat(),
             }
             for m in messages
-            if m.content
+            if m.content and m.content.strip()
         ],
     }
 
@@ -292,20 +309,3 @@ async def stream_chat(
             "X-Accel-Buffering": "no",
         },
     )
-
-
-@router.post(
-    "/sync-catalog",
-    summary="Synchronize product catalog from ERPNext/Frappe into local database",
-)
-async def sync_catalog(
-    limit: int = 100,
-    db: AsyncSession = Depends(get_db),
-) -> dict[str, Any]:
-    """
-    Triggers catalog synchronization from the configured Frappe/ERPNext instance.
-    Pulls items/website items and upserts them into the PostgreSQL products table.
-    """
-    from app.services.sync_service import sync_service
-    result = await sync_service.sync_catalog(db=db, limit=limit)
-    return result

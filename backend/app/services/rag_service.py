@@ -1,3 +1,7 @@
+from pathlib import Path
+from app.services.document_parser import extract_text_from_file
+from app.services.text_chunker import chunk_text
+
 import logging
 from typing import Any
 from sqlalchemy import select, or_, func
@@ -31,39 +35,43 @@ class RAGService:
         Uses pgvector cosine distance with fallback to SQL keyword search.
         """
         k = top_k or self.top_k
-        query_vector = await embedding_service.get_embedding(query)
+        chunks: list[dict[str, Any]] = []
 
         # 1. pgvector cosine similarity search
-        # In pgvector: cosine_distance is 1 - cosine_similarity.
-        # So cosine_similarity = 1 - (embedding <=> query_vector)
-        distance_col = KnowledgeChunk.embedding.cosine_distance(query_vector).label("distance")
+        try:
+            query_vector = await embedding_service.get_embedding(query)
 
-        stmt = (
-            select(KnowledgeChunk, KnowledgeDoc, distance_col)
-            .join(KnowledgeDoc, KnowledgeChunk.doc_id == KnowledgeDoc.id)
-            .where(KnowledgeChunk.embedding.is_not(None))
-        )
+            # In pgvector: cosine_distance is 1 - cosine_similarity.
+            # So cosine_similarity = 1 - (embedding <=> query_vector)
+            distance_col = KnowledgeChunk.embedding.cosine_distance(query_vector).label("distance")
 
-        if category:
-            stmt = stmt.where(KnowledgeDoc.category == category)
+            stmt = (
+                select(KnowledgeChunk, KnowledgeDoc, distance_col)
+                .join(KnowledgeDoc, KnowledgeChunk.doc_id == KnowledgeDoc.id)
+                .where(KnowledgeChunk.embedding.is_not(None))
+            )
 
-        stmt = stmt.order_by(distance_col).limit(k)
-        result = await db.execute(stmt)
-        rows = result.all()
+            if category:
+                stmt = stmt.where(KnowledgeDoc.category == category)
 
-        chunks: list[dict[str, Any]] = []
-        for chunk, doc, dist in rows:
-            similarity = 1.0 - float(dist)
-            if similarity >= self.similarity_threshold:
-                chunks.append({
-                    "id": str(chunk.id),
-                    "title": chunk.title,
-                    "doc_title": doc.title,
-                    "category": doc.category,
-                    "content": chunk.content,
-                    "similarity": round(similarity, 4),
-                    "source_url": doc.source_url,
-                })
+            stmt = stmt.order_by(distance_col).limit(k)
+            result = await db.execute(stmt)
+            rows = result.all()
+
+            for chunk, doc, dist in rows:
+                similarity = 1.0 - float(dist)
+                if similarity >= self.similarity_threshold:
+                    chunks.append({
+                        "id": str(chunk.id),
+                        "title": chunk.title,
+                        "doc_title": doc.title,
+                        "category": doc.category,
+                        "content": chunk.content,
+                        "similarity": round(similarity, 4),
+                        "source_url": doc.source_url,
+                    })
+        except Exception as vec_err:
+            logger.warning(f"Vector search failed for '{query}': {vec_err}. Falling back to keyword search.")
 
         # 2. Resilient Fallback: If no vector matches found, use keyword search
         if not chunks:
@@ -118,5 +126,88 @@ class RAGService:
         logger.info(f"Successfully embedded and saved {len(chunks)} chunks.")
         return len(chunks)
 
+
+    async def ingest_document(
+        self,
+        db: AsyncSession,
+        file_bytes: bytes,
+        filename: str,
+        title: str | None = None,
+        category: str = "general",
+        source_url: str | None = None,
+    ) -> dict[str, Any]:
+        """
+        Parses an uploaded file (PDF, TXT, MD), splits it into semantic chunks,
+        generates vector embeddings, and stores both document and chunks in pgvector.
+
+        Args:
+            db: Database session.
+            file_bytes: In-memory raw bytes of the file.
+            filename: Original file name.
+            title: Optional human-readable document title (defaults to cleaned filename).
+            category: Document category (e.g., 'shipping', 'returns', 'faq', 'warranty').
+            source_url: Optional link to the live online policy page.
+
+        Returns:
+            Dictionary with ingestion summary (doc_id, title, category, chunks_count).
+        """
+        # 1. Parse text from file bytes
+        raw_text = extract_text_from_file(file_bytes=file_bytes, filename=filename)
+
+        # 2. Determine document title
+        doc_title = (title or Path(filename).stem.replace("-", " ").replace("_", " ")).strip().title()
+        doc_category = (category or "general").strip().lower()
+
+        # 3. Chunk text into semantic pieces
+        chunks_data = chunk_text(raw_text, doc_title=doc_title)
+        if not chunks_data:
+            raise ValueError(f"No valid text chunks could be produced from '{filename}'.")
+
+        logger.info(f"Ingesting document '{doc_title}' ({len(chunks_data)} chunks) into category '{doc_category}'...")
+
+        # 4. Create the parent KnowledgeDoc
+        doc = KnowledgeDoc(
+            title=doc_title,
+            category=doc_category,
+            source_url=source_url,
+        )
+        db.add(doc)
+        await db.flush()  # Flushes to generate doc.id without committing
+
+        # 5. Generate vector embeddings in batch
+        texts_to_embed = [f"{c['title']}\n{c['content']}" for c in chunks_data]
+        vectors = await embedding_service.get_embeddings(texts_to_embed)
+
+        # 6. Create KnowledgeChunk records with vector embeddings
+        chunk_objects: list[KnowledgeChunk] = []
+        for idx, (chunk_dict, vector) in enumerate(zip(chunks_data, vectors)):
+            chunk_obj = KnowledgeChunk(
+                doc_id=doc.id,
+                title=chunk_dict["title"],
+                content=chunk_dict["content"],
+                embedding=vector,
+                metadata_info={
+                    "source_file": filename,
+                    "chunk_index": idx + 1,
+                    "total_chunks": len(chunks_data),
+                    "category": doc_category,
+                },
+            )
+            chunk_objects.append(chunk_obj)
+
+        db.add_all(chunk_objects)
+        await db.commit()
+        await db.refresh(doc)
+
+        logger.info(f"Successfully ingested '{doc_title}' with {len(chunk_objects)} embedded chunks.")
+
+        return {
+            "status": "success",
+            "doc_id": str(doc.id),
+            "title": doc.title,
+            "category": doc.category,
+            "chunks_count": len(chunk_objects),
+            "filename": filename,
+        }
 
 rag_service = RAGService()

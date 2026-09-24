@@ -31,6 +31,26 @@ AsyncSessionLocal = async_sessionmaker(
     autoflush=False,
 )
 
+# ━━ Task / Celery Async Engine & Session Factory ━━
+# Celery worker processes execute tasks across temporary event loops via asyncio.run().
+# NullPool prevents pooled asyncpg connections from being bound to closed event loops,
+# preventing cross-loop Future/Event loop runtime errors.
+from sqlalchemy.pool import NullPool
+
+task_engine: AsyncEngine = create_async_engine(
+    settings.DATABASE_URL,
+    echo=settings.DEBUG and settings.ENVIRONMENT == "development",
+    poolclass=NullPool,
+)
+
+TaskSessionLocal = async_sessionmaker(
+    bind=task_engine,
+    class_=AsyncSession,
+    expire_on_commit=False,
+    autocommit=False,
+    autoflush=False,
+)
+
 
 # ━━ Declarative Base for all ORM Models ━━
 class Base(DeclarativeBase):

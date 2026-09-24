@@ -1,5 +1,6 @@
 import json
 import logging
+import time
 from typing import Any
 from fastapi import APIRouter, Header, HTTPException, Query, Request, Response, status
 from fastapi.responses import PlainTextResponse
@@ -42,6 +43,7 @@ async def receive_messenger_event(
     """
     Receives incoming messaging events from Facebook Messenger.
     Verifies HMAC SHA-256 signature and offloads processing to Celery (<50ms response).
+    Supports both text messages and button postbacks.
     """
     body_bytes = await request.body()
 
@@ -64,11 +66,22 @@ async def receive_messenger_event(
             for messaging in entry.get("messaging", []):
                 sender_id = messaging.get("sender", {}).get("id")
                 message_obj = messaging.get("message")
+                postback_obj = messaging.get("postback")
 
-                # Process customer text messages (ignore delivery receipts and read receipts)
-                if sender_id and message_obj and "text" in message_obj:
+                user_text = None
+                message_id = None
+
+                # Support both direct text messages and button/quick-reply postbacks
+                if message_obj and "text" in message_obj:
                     user_text = message_obj["text"]
-                    message_id = message_obj.get("mid", f"mid_{sender_id}_{int(request.state.start_time if hasattr(request.state, 'start_time') else 0)}")
+                    message_id = message_obj.get("mid")
+                elif postback_obj:
+                    user_text = postback_obj.get("payload") or postback_obj.get("title")
+                    message_id = f"mid_pb_{sender_id}_{messaging.get('timestamp', int(time.time() * 1000))}"
+
+                if sender_id and user_text:
+                    if not message_id:
+                        message_id = f"mid_{sender_id}_{int(time.time() * 1000)}"
 
                     logger.info(f"Enqueueing Messenger message from PSID {sender_id}: '{user_text[:50]}'...")
 

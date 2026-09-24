@@ -1,5 +1,7 @@
 import asyncio
 import logging
+import threading
+import weakref
 from collections.abc import AsyncGenerator
 from typing import Any
 from openai import AsyncOpenAI
@@ -17,10 +19,11 @@ class LLMClient:
     """
 
     def __init__(self):
-        self._primary_client: AsyncOpenAI | None = None
-        self._primary_loop: asyncio.AbstractEventLoop | None = None
-        self._fallback_client: AsyncOpenAI | None = None
-        self._fallback_loop: asyncio.AbstractEventLoop | None = None
+        self._lock = threading.Lock()
+        self._primary_clients: weakref.WeakKeyDictionary[asyncio.AbstractEventLoop, AsyncOpenAI] = weakref.WeakKeyDictionary()
+        self._default_primary: AsyncOpenAI | None = None
+        self._fallback_clients: weakref.WeakKeyDictionary[asyncio.AbstractEventLoop, AsyncOpenAI] = weakref.WeakKeyDictionary()
+        self._default_fallback: AsyncOpenAI | None = None
 
         self.primary_model = settings.PRIMARY_LLM_MODEL
         self.fallback_enabled = settings.FALLBACK_ENABLED
@@ -33,14 +36,24 @@ class LLMClient:
         except RuntimeError:
             loop = None
 
-        if self._primary_client is None or self._primary_loop != loop:
-            self._primary_loop = loop
-            self._primary_client = AsyncOpenAI(
-                base_url=settings.LLM_GATEWAY_BASE_URL,
-                api_key=settings.LLM_GATEWAY_API_KEY,
-                timeout=settings.LLM_TIMEOUT_SECONDS,
-            )
-        return self._primary_client
+        if loop is not None:
+            with self._lock:
+                if loop not in self._primary_clients:
+                    self._primary_clients[loop] = AsyncOpenAI(
+                        base_url=settings.LLM_GATEWAY_BASE_URL,
+                        api_key=settings.LLM_GATEWAY_API_KEY,
+                        timeout=settings.LLM_TIMEOUT_SECONDS,
+                    )
+                return self._primary_clients[loop]
+
+        with self._lock:
+            if self._default_primary is None:
+                self._default_primary = AsyncOpenAI(
+                    base_url=settings.LLM_GATEWAY_BASE_URL,
+                    api_key=settings.LLM_GATEWAY_API_KEY,
+                    timeout=settings.LLM_TIMEOUT_SECONDS,
+                )
+            return self._default_primary
 
     @property
     def fallback_client(self) -> AsyncOpenAI | None:
@@ -52,13 +65,22 @@ class LLMClient:
         except RuntimeError:
             loop = None
 
-        if self._fallback_client is None or self._fallback_loop != loop:
-            self._fallback_loop = loop
-            self._fallback_client = AsyncOpenAI(
-                api_key=settings.OPENAI_API_KEY,
-                timeout=settings.LLM_TIMEOUT_SECONDS,
-            )
-        return self._fallback_client
+        if loop is not None:
+            with self._lock:
+                if loop not in self._fallback_clients:
+                    self._fallback_clients[loop] = AsyncOpenAI(
+                        api_key=settings.OPENAI_API_KEY,
+                        timeout=settings.LLM_TIMEOUT_SECONDS,
+                    )
+                return self._fallback_clients[loop]
+
+        with self._lock:
+            if self._default_fallback is None:
+                self._default_fallback = AsyncOpenAI(
+                    api_key=settings.OPENAI_API_KEY,
+                    timeout=settings.LLM_TIMEOUT_SECONDS,
+                )
+            return self._default_fallback
 
     async def chat_completion(
         self,
@@ -84,6 +106,13 @@ class LLMClient:
 
         try:
             response = await self.primary_client.chat.completions.create(**kwargs)
+            if not response.choices:
+                return {
+                    "role": "assistant",
+                    "content": "",
+                    "tool_calls": [],
+                    "finish_reason": "stop",
+                }
             choice = response.choices[0]
             message = choice.message
 
@@ -112,6 +141,13 @@ class LLMClient:
                 logger.info(f"Flipping to fallback model: {self.fallback_model}")
                 kwargs["model"] = self.fallback_model
                 response = await self.fallback_client.chat.completions.create(**kwargs)
+                if not response.choices:
+                    return {
+                        "role": "assistant",
+                        "content": "",
+                        "tool_calls": [],
+                        "finish_reason": "stop",
+                    }
                 choice = response.choices[0]
                 message = choice.message
                 return {
@@ -137,7 +173,9 @@ class LLMClient:
     ) -> AsyncGenerator[str, None]:
         """
         Streams token chunks as they arrive for real-time SSE Web Chat responses.
+        Falls back to secondary provider only if the primary fails before yielding any tokens.
         """
+        has_yielded = False
         try:
             stream = await self.primary_client.chat.completions.create(
                 model=self.primary_model,
@@ -148,11 +186,12 @@ class LLMClient:
             )
             async for chunk in stream:
                 if chunk.choices and chunk.choices[0].delta.content:
+                    has_yielded = True
                     yield chunk.choices[0].delta.content
 
         except Exception as primary_err:
             logger.warning(f"Primary stream failed: {primary_err}")
-            if self.fallback_enabled and self.fallback_client:
+            if not has_yielded and self.fallback_enabled and self.fallback_client:
                 logger.info("Falling back to secondary stream...")
                 stream = await self.fallback_client.chat.completions.create(
                     model=self.fallback_model,

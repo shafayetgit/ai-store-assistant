@@ -3,15 +3,16 @@ import pytest
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.database import AsyncSessionLocal, engine
+from app.core.database import AsyncSessionLocal, engine, task_engine
 from app.main import app
 
 
 @pytest.fixture(autouse=True)
 async def cleanup_db_connections():
-    """Disposes SQLAlchemy connection pool between tests to prevent cross-loop errors."""
+    """Disposes SQLAlchemy connection pools between tests to prevent cross-loop errors."""
     yield
     await engine.dispose()
+    await task_engine.dispose()
 
 
 @pytest.fixture

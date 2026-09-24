@@ -110,3 +110,38 @@ async def test_messenger_webhook_post_ingestion(client: AsyncClient):
     )
     assert res.status_code == 200
     assert res.json() == {"status": "EVENT_RECEIVED"}
+
+
+async def test_messenger_webhook_postback_ingestion(client: AsyncClient):
+    """Tests POST /api/v1/webhooks/messenger postback button event ingestion."""
+    event_body = {
+        "object": "page",
+        "entry": [
+            {
+                "id": "page_123",
+                "messaging": [
+                    {
+                        "sender": {"id": "fb_user_postback_888"},
+                        "recipient": {"id": "page_123"},
+                        "postback": {
+                            "title": "Get Started",
+                            "payload": "GET_STARTED_PAYLOAD",
+                        },
+                    }
+                ],
+            }
+        ],
+    }
+
+    raw_bytes = json.dumps(event_body).encode("utf-8")
+    secret = "test_meta_app_secret_123"
+    meta_service.app_secret = secret
+    sig = "sha256=" + hmac.new(secret.encode(), raw_bytes, hashlib.sha256).hexdigest()
+
+    res = await client.post(
+        "/api/v1/webhooks/messenger",
+        content=raw_bytes,
+        headers={"x-hub-signature-256": sig, "content-type": "application/json"},
+    )
+    assert res.status_code == 200
+    assert res.json() == {"status": "EVENT_RECEIVED"}

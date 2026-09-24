@@ -38,8 +38,8 @@ STORE_TOOLS: list[dict[str, Any]] = [
                     },
                     "in_stock_only": {
                         "type": "boolean",
-                        "description": "If true, returns only items currently in stock.",
-                        "default": True,
+                        "description": "If true, returns only items currently in stock. Defaults to false so customers can learn about out-of-stock or upcoming items.",
+                        "default": False,
                     },
                 },
                 "required": ["query"],
@@ -88,13 +88,13 @@ STORE_TOOLS: list[dict[str, Any]] = [
         "type": "function",
         "function": {
             "name": "search_store_policies",
-            "description": "Search store rules and FAQs: shipping charges, delivery timeframes, 7-day return/refund policy, payment methods (bKash/COD), warranty, and customer care hours.",
+            "description": "Search store knowledge base: company profile, about us, founder/CEO, team, branch locations & addresses, phone numbers, shipping charges, delivery timeframes, return/refund policy, and payment methods.",
             "parameters": {
                 "type": "object",
                 "properties": {
                     "query": {
                         "type": "string",
-                        "description": "The policy or FAQ question (e.g. 'delivery fee inside Dhaka', 'how to return damaged product', 'do you accept bKash').",
+                        "description": "The knowledge base query (e.g. 'who is CEO', 'branch locations', 'Bali Arcade address', 'delivery fee inside Dhaka', 'return policy').",
                     }
                 },
                 "required": ["query"],
@@ -130,29 +130,37 @@ STORE_TOOLS: list[dict[str, Any]] = [
 # ━━ 2. Tool Implementation Handlers ━━
 
 async def handle_search_products(db: AsyncSession, args: dict[str, Any]) -> dict[str, Any]:
-    query_str = args.get("query", "").strip()
+    query_str = (args.get("query") or "").strip()
     category = args.get("category")
     max_price = args.get("max_price")
-    in_stock_only = args.get("in_stock_only", True)
+    in_stock_only = args.get("in_stock_only", False)
 
     stmt = select(Product).where(Product.is_active.is_(True))
 
     if query_str:
-        pattern = f"%{query_str}%"
-        stmt = stmt.where(
-            or_(
-                Product.name.ilike(pattern),
-                Product.description.ilike(pattern),
-                Product.category.ilike(pattern),
-                Product.sku.ilike(pattern),
-            )
-        )
+        words = [w.strip() for w in query_str.split() if len(w.strip()) > 1]
+        if words:
+            word_conditions = []
+            for w in words:
+                p = f"%{w}%"
+                word_conditions.append(
+                    or_(
+                        Product.name.ilike(p),
+                        Product.description.ilike(p),
+                        Product.category.ilike(p),
+                        Product.sku.ilike(p),
+                    )
+                )
+            stmt = stmt.where(and_(*word_conditions))
 
     if category:
         stmt = stmt.where(Product.category.ilike(f"%{category}%"))
 
-    if max_price:
-        stmt = stmt.where(Product.price <= max_price)
+    if max_price is not None:
+        try:
+            stmt = stmt.where(Product.price <= float(max_price))
+        except (ValueError, TypeError):
+            pass
 
     if in_stock_only:
         stmt = stmt.where(Product.stock_quantity > 0)
@@ -163,14 +171,18 @@ async def handle_search_products(db: AsyncSession, args: dict[str, Any]) -> dict
 
     items = []
     for p in products:
+        specs = (p.attributes or {}).get("specifications", {})
+        is_available = p.stock_quantity > 0
         items.append({
             "sku": p.sku,
             "name": p.name,
             "price": float(p.price),
             "currency": p.currency,
-            "in_stock": p.stock_quantity > 0,
-            "stock_quantity": p.stock_quantity,
+            "in_stock": is_available,
+            "stock_status": "In Stock ✅" if is_available else "Out of Stock ❌",
             "category": p.category,
+            "description": p.description,
+            "specifications": specs,
             "url": p.product_url,
             "image": p.image_url,
         })
@@ -183,14 +195,18 @@ async def handle_search_products(db: AsyncSession, args: dict[str, Any]) -> dict
 
 
 async def handle_get_product_details(db: AsyncSession, args: dict[str, Any]) -> dict[str, Any]:
-    sku = args.get("sku", "").strip()
-    stmt = select(Product).where(Product.sku == sku)
+    sku = (args.get("sku") or "").strip()
+    if not sku:
+        return {"found": False, "message": "Product SKU was not specified."}
+
+    stmt = select(Product).where(Product.sku.ilike(sku))
     result = await db.execute(stmt)
     product = result.scalar_one_or_none()
 
     if not product:
         return {"found": False, "message": f"Product with SKU '{sku}' was not found."}
 
+    is_available = product.stock_quantity > 0
     return {
         "found": True,
         "sku": product.sku,
@@ -198,8 +214,8 @@ async def handle_get_product_details(db: AsyncSession, args: dict[str, Any]) -> 
         "description": product.description,
         "price": float(product.price),
         "currency": product.currency,
-        "in_stock": product.stock_quantity > 0,
-        "stock_quantity": product.stock_quantity,
+        "in_stock": is_available,
+        "stock_status": "In Stock ✅" if is_available else "Out of Stock ❌",
         "category": product.category,
         "attributes": product.attributes or {},
         "product_url": product.product_url,
@@ -208,8 +224,11 @@ async def handle_get_product_details(db: AsyncSession, args: dict[str, Any]) -> 
 
 
 async def handle_track_order(db: AsyncSession, args: dict[str, Any]) -> dict[str, Any]:
-    order_num = args.get("order_number", "").strip()
+    order_num = (args.get("order_number") or "").strip()
     contact = args.get("contact")
+
+    if not order_num:
+        return {"found": False, "message": "Please provide an order number (e.g. SO-2026-0042) to track."}
 
     # 1. Check local PostgreSQL database
     stmt = select(Order).where(Order.order_number.ilike(order_num))
@@ -257,7 +276,14 @@ async def handle_track_order(db: AsyncSession, args: dict[str, Any]) -> dict[str
 
 
 async def handle_search_policies(db: AsyncSession, args: dict[str, Any]) -> dict[str, Any]:
-    query = args.get("query", "").strip()
+    query = (args.get("query") or "").strip()
+    if not query:
+        return {
+            "query": "",
+            "matches_found": 0,
+            "policies": [],
+            "guidance": "Please ask a specific store question regarding shipping, returns, warranty, or payment.",
+        }
     results = await rag_service.search(db, query=query, top_k=3)
     return {
         "query": query,
@@ -287,6 +313,13 @@ async def handle_human_handoff(
     ticket_id = str(uuid.uuid4())
 
     # If active conversation exists, record persistent ticket in DB
+    if conversation_id:
+        if isinstance(conversation_id, str):
+            try:
+                conversation_id = uuid.UUID(conversation_id)
+            except ValueError:
+                conversation_id = None
+
     if conversation_id:
         ticket = HandoffTicket(
             id=uuid.UUID(ticket_id),

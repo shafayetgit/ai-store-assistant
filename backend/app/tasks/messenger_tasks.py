@@ -9,7 +9,7 @@ from sqlalchemy.orm import selectinload
 
 from app.core.celery import celery_app
 from app.core.config import settings
-from app.core.database import AsyncSessionLocal, engine
+from app.core.database import TaskSessionLocal
 from app.models.customer import Customer, ChannelIdentity
 from app.models.conversation import Conversation, ConversationState
 from app.services.agent_service import agent_service
@@ -35,7 +35,7 @@ async def _async_process_messenger_message(sender_psid: str, message_text: str, 
         finally:
             await redis.aclose()
 
-        async with AsyncSessionLocal() as session:
+        async with TaskSessionLocal() as session:
             # 2. Resolve or create Customer & ChannelIdentity
             stmt = (
                 select(ChannelIdentity)
@@ -118,9 +118,9 @@ async def _async_process_messenger_message(sender_psid: str, message_text: str, 
                 "reply_length": len(ai_reply),
                 "meta_res": send_res,
             }
-    finally:
-        # Clean up database connection pool before the event loop ends
-        await engine.dispose()
+    except Exception as exc:
+        logger.error(f"Error processing Messenger message for PSID {sender_psid}: {exc}", exc_info=True)
+        raise exc
 
 
 @celery_app.task(name="tasks.process_messenger_message", bind=True, max_retries=2)

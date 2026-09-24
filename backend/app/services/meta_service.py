@@ -107,6 +107,9 @@ class MetaService:
         """
         # Automatically clean out raw markdown asterisks for Messenger
         sanitized_text = clean_markdown_for_messenger(message_text)
+        if not sanitized_text:
+            logger.warning(f"Attempted to send empty message to PSID {recipient_psid}; skipping.")
+            return {}
 
         if not self.is_configured:
             logger.info(f"[DEV DRY-RUN] Messenger reply to {recipient_psid}:\n{sanitized_text}")
@@ -146,7 +149,7 @@ meta_service = MetaService()
 
 
 # <script 
-#   src="http://localhost:8000>/static/widget/chat-widget.js" 
-#   data-api-base="http://localhost:8000>" 
+#   src="http://localhost:8000/static/widget/chat-widget.js" 
+#   data-api-base="http://localhost:8000" 
 #   defer>
 # </script>

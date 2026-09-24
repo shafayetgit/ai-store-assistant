@@ -12,6 +12,25 @@ async def seed_data():
     async with async_session_maker() as session:
         print("🌱 Seeding initial mock data into database...")
 
+        # 0. Clean up any previous mock seed records for idempotency
+        await session.execute(delete(KnowledgeDoc).where(KnowledgeDoc.title.in_([
+            "Shipping & Delivery Policy",
+            "Return, Refund & Exchange Policy",
+            "Store Hours, Contact & Payment Options",
+        ])))
+        await session.execute(delete(OrderItem))
+        await session.execute(delete(Order).where(Order.order_number == "SO-2026-0042"))
+        await session.execute(delete(Product).where(Product.sku.in_([
+            "TSH-BLK-001", "HOD-NVY-002", "EBD-PRO-003", "BOT-SLV-004", "SNK-WHT-005"
+        ])))
+        await session.execute(delete(ChannelIdentity).where(ChannelIdentity.channel_user_id.in_([
+            "fb_psid_9876543210", "web_session_abc123xyz789"
+        ])))
+        await session.execute(delete(Customer).where(Customer.email.in_([
+            "tanvir.ahmed@example.com", "nusrat.jahan@example.com"
+        ])))
+        await session.commit()
+
         # 1. Seed Customers & Channel Identities
         cust1 = Customer(
             full_name="Tanvir Ahmed",
@@ -201,8 +220,16 @@ async def seed_data():
             )
         ]
         session.add_all(chunks)
-
         await session.commit()
+
+        # 5. Generate and Store Vector Embeddings for Knowledge Chunks
+        try:
+            from app.services.rag_service import rag_service
+            embedded_count = await rag_service.embed_unembedded_chunks(session)
+            print(f"  - Vector Embeddings: Embedded {embedded_count} chunks into pgvector")
+        except Exception as emb_exc:
+            print(f"  - Vector Embeddings: Skipped ({emb_exc}) — keyword fallback active")
+
         print("✅ Mock data seeded successfully!")
         print(f"  - Customers: 2")
         print(f"  - Products: {len(products)} (including 1 out-of-stock item)")

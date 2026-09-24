@@ -1,5 +1,5 @@
 from functools import lru_cache
-from typing import Literal
+from typing import Any, Literal
 from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -33,6 +33,7 @@ class Settings(BaseSettings):
     STORE_BASE_URL: str = "https://hnbpark.com"
     STORE_API_KEY: str = ""
     STORE_API_SECRET: str = ""
+    STORE_WEBHOOK_SECRET: str = ""
     STORE_TIMEOUT_SECONDS: float = 5.0
     STORE_CATALOG_SYNC_INTERVAL_HOURS: int = 1
 
@@ -55,7 +56,6 @@ class Settings(BaseSettings):
     OPENAI_API_KEY: str = ""
     FALLBACK_LLM_MODEL: str = "gpt-4o-mini"
     LLM_TIMEOUT_SECONDS: float = 10.0
-    LLM_MAX_TOOL_TURNS: int = 3
 
     # Vector Store & RAG
     EMBEDDING_DIMENSION: int = 1024

@@ -3,7 +3,8 @@
 
   // Config: Detect base URL from the script tag or default to current origin
   const currentScript = document.currentScript;
-  const API_BASE = (currentScript && currentScript.getAttribute('data-api-base')) || window.location.origin;
+  const rawApiBase = (currentScript && currentScript.getAttribute('data-api-base')) || window.location.origin;
+  const API_BASE = rawApiBase.replace(/\/+$/, '');
   const WIDGET_TITLE = (currentScript && currentScript.getAttribute('data-title')) || 'Store Assistant';
   const WIDGET_LOGO = (currentScript && currentScript.getAttribute('data-logo')) || null;
 
@@ -448,6 +449,15 @@
     }
   });
 
+  function sanitizeUrl(url) {
+    if (!url) return '#';
+    const trimmed = url.trim();
+    if (/^(https?:\/\/|\/)/i.test(trimmed)) {
+      return trimmed.replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+    }
+    return '#';
+  }
+
   // Markdown Formatter (Links, Bold, Numbered & Bullet lists, paragraphs)
   function renderMarkdown(text) {
     if (!text) return '';
@@ -456,14 +466,14 @@
       .replace(/</g, '&lt;')
       .replace(/>/g, '&gt;');
 
-    // 1. Convert Markdown links [Title](https://...) -> open in existing page
-    html = html.replace(/\[([^\]]+)\]\((https?:\/\/[^\s\)]+)\)/g, function(match, title, url) {
-      return `<a href="${url.trim()}">${title}</a>`;
+    // 1. Convert Markdown links [Title](https://... or /...) -> open in existing page
+    html = html.replace(/\[([^\]]+)\]\(((?:https?:\/\/|\/)[^\s\)]+)\)/g, function(match, title, url) {
+      return `<a href="${sanitizeUrl(url)}">${title}</a>`;
     });
 
     // 2. Convert standalone raw URLs (http:// or https://) -> open in existing page
     html = html.replace(/(^|[\s(])(https?:\/\/[^\s<)]+)(?=[)\s]|$)/g, function(match, prefix, url) {
-      return `${prefix}<a href="${url.trim()}">${url.trim()}</a>`;
+      return `${prefix}<a href="${sanitizeUrl(url)}">${url.trim()}</a>`;
     });
 
     // 3. Bold **text**
@@ -682,7 +692,10 @@
             if (dataStr === '[DONE]') break;
             try {
               const parsed = JSON.parse(dataStr);
-              if (parsed.token) {
+              if (parsed.error) {
+                asstMsg.innerHTML = `<span style="color:#dc2626;">⚠️ ${parsed.error}</span>`;
+                messagesContainer.scrollTop = messagesContainer.scrollHeight;
+              } else if (parsed.token) {
                 fullTokens += parsed.token;
                 asstMsg.innerHTML = renderMarkdown(fullTokens);
                 messagesContainer.scrollTop = messagesContainer.scrollHeight;
@@ -692,6 +705,10 @@
             }
           }
         }
+      }
+
+      if (!fullTokens && !asstMsg.innerHTML) {
+        asstMsg.innerHTML = '⚠️ No response received. Please try again.';
       }
     } catch (err) {
       console.error('SSE streaming error:', err);
