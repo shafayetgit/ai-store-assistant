@@ -1,0 +1,185 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Coderiven — Online Store</title>
+  <link rel="icon" type="image/png" href="/static/images/favicon.png" />
+  <link rel="shortcut icon" href="/static/images/favicon.png" />
+  <link rel="apple-touch-icon" href="/static/images/favicon.png" />
+  <style>
+    :root {
+      --primary: #000000;
+      --dark: #000000;
+      --light-bg: #f9fafb;
+      --card-border: #e5e7eb;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      background: var(--light-bg);
+      color: #111827;
+      line-height: 1.6;
+    }
+    header {
+      background: #ffffff;
+      border-bottom: 1px solid var(--card-border);
+      padding: 16px 32px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      position: sticky;
+      top: 0;
+      z-index: 100;
+    }
+    .logo {
+      font-size: 20px;
+      font-weight: 700;
+      color: var(--dark);
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .nav-links {
+      display: flex;
+      gap: 20px;
+      font-size: 14px;
+      font-weight: 500;
+    }
+    .nav-links a { text-decoration: none; color: #6b7280; transition: color 0.15s; }
+    .nav-links a:hover { color: var(--primary); }
+    
+    .hero {
+      background: #000000;
+      color: #ffffff;
+      padding: 60px 32px;
+      text-align: center;
+    }
+    .hero h1 { font-size: 36px; margin-bottom: 12px; font-weight: 700; }
+    .hero p { font-size: 16px; color: #9ca3af; max-width: 600px; margin: 0 auto 24px; }
+    
+    .container { max-width: 1100px; margin: 40px auto; padding: 0 20px; }
+    .section-title { font-size: 22px; font-weight: 700; color: var(--dark); margin-bottom: 20px; }
+    
+    .products-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+      gap: 24px;
+      margin-bottom: 48px;
+    }
+    .product-card {
+      background: white;
+      border: 1px solid var(--card-border);
+      border-radius: 5px;
+      overflow: hidden;
+      box-shadow: 0 2px 4px rgba(0,0,0,0.02);
+      transition: transform 0.2s, box-shadow 0.2s;
+    }
+    .product-card:hover {
+      transform: translateY(-4px);
+      box-shadow: 0 10px 15px rgba(0,0,0,0.05);
+    }
+    .product-img {
+      height: 180px;
+      background: #f3f4f6;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 48px;
+    }
+    .product-body { padding: 16px; }
+    .product-tag { font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px; color: #6b7280; font-weight: 700; }
+    .product-name { font-size: 15px; font-weight: 600; color: var(--dark); margin: 4px 0 8px; }
+    .product-price { font-size: 16px; font-weight: 700; color: #000000; }
+
+    .order-demo-box {
+      background: #ffffff;
+      border: 1px solid var(--card-border);
+      border-radius: 5px;
+      padding: 24px;
+      margin-bottom: 48px;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.02);
+    }
+    .order-demo-box h3 { color: #000000; margin-bottom: 8px; font-size: 17px; font-weight: 700; }
+    .order-demo-box p { font-size: 14px; color: #374151; }
+    .code-badge {
+      background: #000000;
+      color: #ffffff;
+      padding: 3px 8px;
+      border-radius: 5px;
+      font-family: monospace;
+      font-weight: 600;
+      font-size: 13px;
+    }
+  </style>
+</head>
+<body>
+
+  <header>
+    <div class="logo">
+      <img src="/static/images/logo.png" alt="Logo" style="height: 28px; vertical-align: middle; margin-right: 8px;" />
+    </div>
+    <div class="nav-links">
+      <a href="#products">Apparel</a>
+      <a href="#products">Electronics</a>
+      <a href="#order-track">Order Tracking</a>
+    </div>
+  </header>
+
+  <div class="hero">
+    <h1>Welcome to Coderiven Store</h1>
+    <p>Explore high quality apparel, electronics, and seamless instant customer service powered by AI.</p>
+  </div>
+
+  <div class="container">
+    <div class="order-demo-box" id="order-track">
+      <h3>🚚 Test Live Order Tracking via AI Chat</h3>
+      <p>
+        Click the chat bubble in the bottom-right corner and ask:
+        <br/>
+        👉 <strong>"Where is my order <span class="code-badge">SO-2026-0042</span>?"</strong> or 
+        👉 <strong>"Do you have any black t-shirts in stock?"</strong>
+      </p>
+    </div>
+
+    <h2 class="section-title" id="products">Featured Products</h2>
+    <div class="products-grid">
+      <div class="product-card">
+        <div class="product-img">👕</div>
+        <div class="product-body">
+          <div class="product-tag">Apparel</div>
+          <div class="product-name">Premium Crewneck T-Shirt</div>
+          <div class="product-price">৳ 850 BDT</div>
+        </div>
+      </div>
+      <div class="product-card">
+        <div class="product-img">🧥</div>
+        <div class="product-body">
+          <div class="product-tag">Apparel</div>
+          <div class="product-name">Heavyweight Fleece Hoodie</div>
+          <div class="product-price">৳ 2,250 BDT</div>
+        </div>
+      </div>
+      <div class="product-card">
+        <div class="product-img">🎧</div>
+        <div class="product-body">
+          <div class="product-tag">Electronics</div>
+          <div class="product-name">Wireless Noise-Cancelling Earbuds</div>
+          <div class="product-price">৳ 4,500 BDT</div>
+        </div>
+      </div>
+      <div class="product-card">
+        <div class="product-img">⌨️</div>
+        <div class="product-body">
+          <div class="product-tag">Electronics</div>
+          <div class="product-name">Mechanical Gaming Keyboard RGB</div>
+          <div class="product-price">৳ 5,800 BDT</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Embed AI Store Assistant Widget -->
+  <script src="/static/widget/chat-widget.js" data-logo="/static/images/favicon.png" data-title="Store Assistant" defer></script>
+</body>
+</html>

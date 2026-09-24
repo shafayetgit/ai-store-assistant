@@ -1,0 +1,56 @@
+services:
+  backend:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    container_name: aistore-backend
+    restart: unless-stopped
+    env_file:
+      - ./backend/.env
+    environment:
+      - DATABASE_URL=postgresql+asyncpg://postgres:postgrespassword@pgvector_db:5432/aistore_db
+      - REDIS_URL=redis://redis:6379/3
+      - CELERY_BROKER_URL=redis://redis:6379/4
+      - CELERY_RESULT_BACKEND=redis://redis:6379/5
+    ports:
+      - "8000:8000"
+    networks:
+      - erp-network
+
+  celery_worker:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    container_name: aistore-celery-worker
+    restart: unless-stopped
+    command: celery -A app.core.celery.celery_app worker --loglevel=info --concurrency=4
+    env_file:
+      - ./backend/.env
+    environment:
+      - DATABASE_URL=postgresql+asyncpg://postgres:postgrespassword@pgvector_db:5432/aistore_db
+      - REDIS_URL=redis://redis:6379/3
+      - CELERY_BROKER_URL=redis://redis:6379/4
+      - CELERY_RESULT_BACKEND=redis://redis:6379/5
+    networks:
+      - erp-network
+
+  # celery_beat:
+  #   build:
+  #     context: ..
+  #     dockerfile: docker/Dockerfile
+  #   container_name: aistore-celery-beat
+  #   restart: unless-stopped
+  #   command: celery -A app.core.celery.celery_app beat --loglevel=info
+  #   env_file:
+  #     - ../backend/.env
+  #   environment:
+  #     - DATABASE_URL=postgresql+asyncpg://postgres:postgrespassword@pgvector_db:5432/aistore_db
+  #     - REDIS_URL=redis://redis:6379/3
+  #     - CELERY_BROKER_URL=redis://redis:6379/4
+  #     - CELERY_RESULT_BACKEND=redis://redis:6379/5
+  #   networks:
+  #     - erp-network
+
+networks:
+  erp-network:
+    external: true
